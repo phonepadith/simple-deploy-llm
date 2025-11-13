@@ -80,6 +80,7 @@ echo "Creating Ollama model..."
 ollama create BOL-CH-2 -f Modelfile
 ollama cp BOL-CH-2 BOL-CH-3
 ollama cp BOL-CH-2 BOL-CH-4
+ollama cp BOL-CH-2 ROBOT-AIDC-LLM
 
 echo "Model created successfully!"
 echo "Model name: aidc-llm-laos"
