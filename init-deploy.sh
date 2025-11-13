@@ -25,9 +25,15 @@ mkdir -p AIDC-LLM
 cd AIDC-LLM
 
 # Download model file
-echo "Downloading model..."
+echo "Downloading model AIDC-12B-IT..."
 wget -O aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf \
 "https://huggingface.co/Phonepadith/aidc-llm-laos-24k-gemma-3-12b-it/resolve/main/aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf"
+
+#Download Speed Model of AIDC
+echo "Downloading model AIDC-4B-IT..."
+wget -O aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf \
+"https://huggingface.co/Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it/resolve/main/aidc-llm-laos-24k-gemma-3-4b-it-Q8.gguf"
+
 
 # Create RAG-optimized Modelfile
 cat <<'EOF' > Modelfile
