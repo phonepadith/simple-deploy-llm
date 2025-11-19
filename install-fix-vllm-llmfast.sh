@@ -1,172 +1,173 @@
 #!/bin/bash
-# merge_with_unsloth.sh
-# Use unsloth to merge the LoRA adapter (since it was trained with unsloth)
+# fix_and_deploy.sh
+# Fix unsloth weight keys and deploy with vLLM
 
 set -e
 
 echo "============================================================"
-echo "  Merging LoRA Adapter with Unsloth"
-echo "  Model: aidc-llm-laos-24k-gemma-3-4b-it"
+echo "  Fixing Unsloth Model Weights for vLLM"
 echo "============================================================"
 echo ""
 
-ADAPTER_DIR="/workspace/aidc-model"
 MERGED_DIR="/workspace/aidc-model-merged"
+FIXED_DIR="/workspace/aidc-model-vllm-ready"
 PORT=8000
 
-# Setup environment
-export HF_HUB_ENABLE_HF_TRANSFER=0
-export CUDA_VISIBLE_DEVICES=0
-
-echo "[1/4] Installing unsloth..."
-pip install -q "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-pip install -q --upgrade transformers
-echo "✓ Unsloth installed"
-echo ""
-
-echo "[2/4] Checking adapter..."
-if [ ! -d "$ADAPTER_DIR" ]; then
-    python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it', local_dir='$ADAPTER_DIR', local_dir_use_symlinks=False)
-"
-fi
-echo "✓ Adapter ready"
-echo ""
-
-echo "[3/4] Merging with unsloth..."
-echo "This will take 5-15 minutes..."
-echo ""
-
-python << 'UNSLOTH_MERGE'
-from unsloth import FastLanguageModel
-import torch
-import os
-
-ADAPTER_DIR = "/workspace/aidc-model"
-MERGED_DIR = "/workspace/aidc-model-merged"
-
-print("="*60)
-print("Loading model with unsloth...")
-print("="*60)
-
-try:
-    # Load the adapter with unsloth
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=ADAPTER_DIR,
-        max_seq_length=24576,
-        dtype=torch.bfloat16,
-        load_in_4bit=False,  # Load in full precision for merging
-    )
-    
-    print("\nSaving merged model in 16-bit format...")
-    print(f"Output directory: {MERGED_DIR}")
-    
-    # Save the merged model
-    model.save_pretrained_merged(
-        MERGED_DIR,
-        tokenizer,
-        save_method="merged_16bit",  # Save as full 16-bit model
-    )
-    
-    print("\n" + "="*60)
-    print("✓ Merge successful!")
-    print("="*60)
-    print(f"Merged model saved to: {MERGED_DIR}")
-    
-except Exception as e:
-    print(f"\n✗ Merge failed: {e}")
-    import traceback
-    traceback.print_exc()
-    exit(1)
-UNSLOTH_MERGE
-
-if [ $? -ne 0 ]; then
-    echo "✗ Merge failed"
+if [ ! -d "$MERGED_DIR" ]; then
+    echo "✗ Merged model not found at $MERGED_DIR"
+    echo "Please run the merge script first"
     exit 1
 fi
 
+echo "[1/3] Fixing weight keys..."
+
+if [ -d "$FIXED_DIR" ]; then
+    echo "Fixed model already exists. Remove it? (y/N)"
+    read -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf "$FIXED_DIR"
+    else
+        echo "Using existing fixed model"
+    fi
+fi
+
+if [ ! -d "$FIXED_DIR" ]; then
+python << 'FIX_WEIGHTS'
+import torch
+from safetensors.torch import load_file, save_file
+import os
+import json
+from pathlib import Path
+
+MERGED_DIR = "/workspace/aidc-model-merged"
+FIXED_DIR = "/workspace/aidc-model-vllm-ready"
+
+print("="*60)
+print("Fixing weight key names for vLLM compatibility")
+print("="*60)
+
+os.makedirs(FIXED_DIR, exist_ok=True)
+
+# Get all safetensors files
+safetensor_files = list(Path(MERGED_DIR).glob("*.safetensors"))
+print(f"\nFound {len(safetensor_files)} safetensors file(s)")
+
+for idx, file_path in enumerate(safetensor_files, 1):
+    print(f"\n[{idx}/{len(safetensor_files)}] Processing {file_path.name}...")
+    
+    # Load weights
+    weights = load_file(str(file_path))
+    
+    # Check and fix key names
+    fixed_weights = {}
+    changes_made = False
+    
+    for key, tensor in weights.items():
+        # Remove unwanted prefixes
+        new_key = key
+        
+        # Remove 'language_model.' prefix if present
+        if new_key.startswith('language_model.'):
+            new_key = new_key.replace('language_model.', '', 1)
+            changes_made = True
+        
+        # Remove 'base_model.model.' prefix if present
+        if new_key.startswith('base_model.model.'):
+            new_key = new_key.replace('base_model.model.', '', 1)
+            changes_made = True
+        
+        # Remove 'model.' prefix if it's the first component
+        if new_key.startswith('model.') and not new_key.startswith('model.layers'):
+            # Keep 'model.layers' but remove standalone 'model.'
+            parts = new_key.split('.', 1)
+            if len(parts) > 1 and not parts[1].startswith('layers'):
+                new_key = parts[1]
+                changes_made = True
+        
+        fixed_weights[new_key] = tensor
+        
+        if new_key != key:
+            print(f"  Renamed: {key[:60]}... -> {new_key[:60]}...")
+    
+    if not changes_made:
+        print(f"  No changes needed for {file_path.name}")
+    
+    # Save fixed weights
+    output_path = Path(FIXED_DIR) / file_path.name
+    save_file(fixed_weights, str(output_path))
+    print(f"  Saved to: {output_path.name}")
+
+# Copy config and tokenizer files
+print("\nCopying config and tokenizer files...")
+for file_name in ['config.json', 'tokenizer.json', 'tokenizer_config.json', 
+                  'special_tokens_map.json', 'tokenizer.model', 'generation_config.json']:
+    src = Path(MERGED_DIR) / file_name
+    if src.exists():
+        dst = Path(FIXED_DIR) / file_name
+        import shutil
+        shutil.copy2(src, dst)
+        print(f"  Copied: {file_name}")
+
+print("\n" + "="*60)
+print("✓ Weight fixing complete!")
+print("="*60)
+print(f"Fixed model saved to: {FIXED_DIR}")
+FIX_WEIGHTS
+
+    if [ $? -ne 0 ]; then
+        echo "✗ Weight fixing failed"
+        exit 1
+    fi
+fi
+
 echo ""
 
-echo "[4/4] Fixing config for vLLM..."
-cd "$MERGED_DIR"
+echo "[2/3] Verifying fixed model..."
+python << 'VERIFY'
+from safetensors.torch import load_file
+from pathlib import Path
 
-python << 'FIX_CONFIG'
-import json
-import os
+FIXED_DIR = "/workspace/aidc-model-vllm-ready"
 
-if not os.path.exists('config.json'):
-    print("✗ config.json not found!")
+# Check first safetensors file
+safetensor_files = list(Path(FIXED_DIR).glob("*.safetensors"))
+if not safetensor_files:
+    print("✗ No safetensors files found!")
     exit(1)
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
+weights = load_file(str(safetensor_files[0]))
+sample_keys = list(weights.keys())[:5]
 
-# Save backup
-with open('config.json.backup', 'w') as f:
-    json.dump(config, f, indent=2)
+print("Sample weight keys:")
+for key in sample_keys:
+    print(f"  {key}")
 
-# Get config source
-text_config = config.get('text_config', config)
+# Check for bad prefixes
+bad_prefixes = ['language_model.', 'base_model.']
+has_bad_prefix = any(key.startswith(prefix) for prefix in bad_prefixes for key in sample_keys)
 
-# Build vLLM-compatible config
-new_config = {
-    "architectures": ["GemmaForCausalLM"],
-    "model_type": "gemma2",
-    "torch_dtype": "bfloat16",
-    "hidden_size": text_config.get("hidden_size", 2560),
-    "intermediate_size": text_config.get("intermediate_size", 10240),
-    "num_hidden_layers": text_config.get("num_hidden_layers", 34),
-    "num_attention_heads": text_config.get("num_attention_heads", 8),
-    "num_key_value_heads": text_config.get("num_key_value_heads", 4),
-    "head_dim": text_config.get("head_dim", 256),
-    "max_position_embeddings": text_config.get("max_position_embeddings", 131072),
-    "hidden_act": text_config.get("hidden_activation") or text_config.get("hidden_act", "gelu_pytorch_tanh"),
-    "rms_norm_eps": text_config.get("rms_norm_eps", 1e-06),
-    "rope_theta": text_config.get("rope_theta", 1000000.0),
-    "attention_bias": text_config.get("attention_bias", False),
-    "attention_dropout": text_config.get("attention_dropout", 0.0),
-    "query_pre_attn_scalar": text_config.get("query_pre_attn_scalar", 256),
-    "sliding_window": text_config.get("sliding_window", 4096),
-    "bos_token_id": config.get("bos_token_id", 2),
-    "eos_token_id": config.get("eos_token_id", 1),
-    "pad_token_id": config.get("pad_token_id", 0),
-    "vocab_size": text_config.get("vocab_size", 256000),
-    "initializer_range": 0.02,
-    "use_cache": True,
-}
+if has_bad_prefix:
+    print("\n✗ ERROR: Model still has incompatible prefixes!")
+    exit(1)
 
-new_config = {k: v for k, v in new_config.items() if v is not None}
-
-with open('config.json', 'w') as f:
-    json.dump(new_config, f, indent=2)
-
-print("✓ Config fixed for vLLM")
-print(f"  Architecture: {new_config['architectures'][0]}")
-print(f"  Model type: {new_config['model_type']}")
-FIX_CONFIG
-
-cd /workspace
+print("\n✓ Model structure looks good for vLLM")
+VERIFY
 
 echo ""
-echo "============================================================"
-echo "✓ Model ready for vLLM deployment!"
-echo "============================================================"
-echo ""
-echo "Now starting vLLM server..."
-echo ""
 
-# Install vLLM if needed
+echo "[3/3] Starting vLLM server..."
+
 if ! python -c "import vllm" 2>/dev/null; then
     echo "Installing vLLM..."
     pip install vllm
 fi
 
-# Start vLLM server
+echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  vLLM Server Starting"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Model: $MERGED_DIR"
+echo "  Model: $FIXED_DIR"
 echo "  Port: $PORT"
 echo ""
 echo "  API Endpoints:"
@@ -178,7 +179,7 @@ echo ""
 sleep 2
 
 python -m vllm.entrypoints.openai.api_server \
-    --model "$MERGED_DIR" \
+    --model "$FIXED_DIR" \
     --host 0.0.0.0 \
     --port $PORT \
     --max-model-len 24576 \
