@@ -1,53 +1,45 @@
 #!/bin/bash
-# fix_and_deploy.sh
-# Fix unsloth weight keys and deploy with vLLM
+# final_fix_and_deploy.sh
+# Add proper 'model.' prefix to weight keys
 
 set -e
 
 echo "============================================================"
-echo "  Fixing Unsloth Model Weights for vLLM"
+echo "  Final Weight Key Fix for vLLM Compatibility"
 echo "============================================================"
 echo ""
 
-MERGED_DIR="/workspace/aidc-model-merged"
-FIXED_DIR="/workspace/aidc-model-vllm-ready"
+MERGED_DIR="/workspace/aidc-model-vllm-ready"
+FINAL_DIR="/workspace/aidc-model-final"
 PORT=8000
 
 if [ ! -d "$MERGED_DIR" ]; then
-    echo "✗ Merged model not found at $MERGED_DIR"
-    echo "Please run the merge script first"
+    echo "✗ Model not found at $MERGED_DIR"
     exit 1
 fi
 
-echo "[1/3] Fixing weight keys..."
+echo "[1/2] Adding 'model.' prefix to weight keys..."
 
-if [ -d "$FIXED_DIR" ]; then
-    echo "Fixed model already exists. Remove it? (y/N)"
-    read -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$FIXED_DIR"
-    else
-        echo "Using existing fixed model"
-    fi
+if [ -d "$FINAL_DIR" ]; then
+    rm -rf "$FINAL_DIR"
 fi
 
-if [ ! -d "$FIXED_DIR" ]; then
-python << 'FIX_WEIGHTS'
+python << 'FINAL_FIX'
 import torch
 from safetensors.torch import load_file, save_file
 import os
 import json
 from pathlib import Path
+import shutil
 
-MERGED_DIR = "/workspace/aidc-model-merged"
-FIXED_DIR = "/workspace/aidc-model-vllm-ready"
+MERGED_DIR = "/workspace/aidc-model-vllm-ready"
+FINAL_DIR = "/workspace/aidc-model-final"
 
 print("="*60)
-print("Fixing weight key names for vLLM compatibility")
+print("Adding proper 'model.' prefix to all weights")
 print("="*60)
 
-os.makedirs(FIXED_DIR, exist_ok=True)
+os.makedirs(FINAL_DIR, exist_ok=True)
 
 # Get all safetensors files
 safetensor_files = list(Path(MERGED_DIR).glob("*.safetensors"))
@@ -59,127 +51,105 @@ for idx, file_path in enumerate(safetensor_files, 1):
     # Load weights
     weights = load_file(str(file_path))
     
-    # Check and fix key names
+    # Fix key names - add 'model.' prefix where needed
     fixed_weights = {}
-    changes_made = False
     
     for key, tensor in weights.items():
-        # Remove unwanted prefixes
         new_key = key
         
-        # Remove 'language_model.' prefix if present
-        if new_key.startswith('language_model.'):
-            new_key = new_key.replace('language_model.', '', 1)
-            changes_made = True
-        
-        # Remove 'base_model.model.' prefix if present
-        if new_key.startswith('base_model.model.'):
-            new_key = new_key.replace('base_model.model.', '', 1)
-            changes_made = True
-        
-        # Remove 'model.' prefix if it's the first component
-        if new_key.startswith('model.') and not new_key.startswith('model.layers'):
-            # Keep 'model.layers' but remove standalone 'model.'
-            parts = new_key.split('.', 1)
-            if len(parts) > 1 and not parts[1].startswith('layers'):
-                new_key = parts[1]
-                changes_made = True
+        # Keys that should have 'model.' prefix
+        if not key.startswith('model.') and not key.startswith('lm_head.'):
+            # Add 'model.' prefix to everything except lm_head
+            if key == 'embed_tokens.weight':
+                new_key = 'model.embed_tokens.weight'
+            elif key.startswith('layers.') or key.startswith('norm.'):
+                new_key = f'model.{key}'
+            else:
+                new_key = f'model.{key}'
         
         fixed_weights[new_key] = tensor
         
         if new_key != key:
-            print(f"  Renamed: {key[:60]}... -> {new_key[:60]}...")
-    
-    if not changes_made:
-        print(f"  No changes needed for {file_path.name}")
+            print(f"  {key} -> {new_key}")
     
     # Save fixed weights
-    output_path = Path(FIXED_DIR) / file_path.name
+    output_path = Path(FINAL_DIR) / file_path.name
     save_file(fixed_weights, str(output_path))
-    print(f"  Saved to: {output_path.name}")
+    print(f"  ✓ Saved: {output_path.name}")
 
-# Copy config and tokenizer files
+# Copy other files
 print("\nCopying config and tokenizer files...")
-for file_name in ['config.json', 'tokenizer.json', 'tokenizer_config.json', 
-                  'special_tokens_map.json', 'tokenizer.model', 'generation_config.json']:
-    src = Path(MERGED_DIR) / file_name
-    if src.exists():
-        dst = Path(FIXED_DIR) / file_name
-        import shutil
-        shutil.copy2(src, dst)
-        print(f"  Copied: {file_name}")
+for file_name in os.listdir(MERGED_DIR):
+    if not file_name.endswith('.safetensors'):
+        src = Path(MERGED_DIR) / file_name
+        dst = Path(FINAL_DIR) / file_name
+        if src.is_file():
+            shutil.copy2(src, dst)
+            print(f"  ✓ {file_name}")
+
+# Verify
+print("\nVerifying final weight structure...")
+first_file = list(Path(FINAL_DIR).glob("*.safetensors"))[0]
+weights = load_file(str(first_file))
+sample_keys = sorted(weights.keys())[:10]
+
+print("\nSample weight keys:")
+for key in sample_keys:
+    print(f"  {key}")
+
+# Check structure
+has_model_prefix = any(k.startswith('model.') for k in sample_keys)
+has_embed = 'model.embed_tokens.weight' in weights
+has_norm = any('model.norm' in k for k in weights.keys())
+
+print(f"\n✓ Has 'model.' prefix: {has_model_prefix}")
+print(f"✓ Has 'model.embed_tokens.weight': {has_embed}")
+print(f"✓ Has norm layer: {has_norm}")
+
+if not (has_model_prefix and has_embed):
+    print("\n✗ ERROR: Weight structure still incorrect!")
+    exit(1)
 
 print("\n" + "="*60)
-print("✓ Weight fixing complete!")
+print("✓ Weight keys fixed successfully!")
 print("="*60)
-print(f"Fixed model saved to: {FIXED_DIR}")
-FIX_WEIGHTS
+print(f"Final model saved to: {FINAL_DIR}")
+FINAL_FIX
 
-    if [ $? -ne 0 ]; then
-        echo "✗ Weight fixing failed"
-        exit 1
-    fi
+if [ $? -ne 0 ]; then
+    echo "✗ Final fix failed"
+    exit 1
 fi
 
 echo ""
 
-echo "[2/3] Verifying fixed model..."
-python << 'VERIFY'
-from safetensors.torch import load_file
-from pathlib import Path
-
-FIXED_DIR = "/workspace/aidc-model-vllm-ready"
-
-# Check first safetensors file
-safetensor_files = list(Path(FIXED_DIR).glob("*.safetensors"))
-if not safetensor_files:
-    print("✗ No safetensors files found!")
-    exit(1)
-
-weights = load_file(str(safetensor_files[0]))
-sample_keys = list(weights.keys())[:5]
-
-print("Sample weight keys:")
-for key in sample_keys:
-    print(f"  {key}")
-
-# Check for bad prefixes
-bad_prefixes = ['language_model.', 'base_model.']
-has_bad_prefix = any(key.startswith(prefix) for prefix in bad_prefixes for key in sample_keys)
-
-if has_bad_prefix:
-    print("\n✗ ERROR: Model still has incompatible prefixes!")
-    exit(1)
-
-print("\n✓ Model structure looks good for vLLM")
-VERIFY
-
-echo ""
-
-echo "[3/3] Starting vLLM server..."
+echo "[2/2] Starting vLLM server..."
 
 if ! python -c "import vllm" 2>/dev/null; then
-    echo "Installing vLLM..."
     pip install vllm
 fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  vLLM Server Starting"
+echo "  🚀 vLLM Server Starting - Final Deployment"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Model: $FIXED_DIR"
+echo "  Model: $FINAL_DIR"
 echo "  Port: $PORT"
 echo ""
-echo "  API Endpoints:"
-echo "    http://localhost:$PORT/v1/models"
-echo "    http://localhost:$PORT/v1/completions"
-echo "    http://localhost:$PORT/v1/chat/completions"
+echo "  Test with:"
+echo "    curl http://localhost:$PORT/v1/models"
+echo ""
+echo "    curl http://localhost:$PORT/v1/completions \\"
+echo "      -H 'Content-Type: application/json' \\"
+echo "      -d '{\"model\": \"aidc-model-final\","
+echo "           \"prompt\": \"ສະບາຍດີ\","
+echo "           \"max_tokens\": 50}'"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 sleep 2
 
 python -m vllm.entrypoints.openai.api_server \
-    --model "$FIXED_DIR" \
+    --model "$FINAL_DIR" \
     --host 0.0.0.0 \
     --port $PORT \
     --max-model-len 24576 \
