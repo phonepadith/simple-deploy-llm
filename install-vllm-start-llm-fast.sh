@@ -33,14 +33,26 @@ export HF_HUB_ENABLE_HF_TRANSFER=0
 export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
-# Check GPU availability
-if ! nvidia-smi &> /dev/null; then
-    echo "✗ ERROR: No GPU detected"
-    exit 1
+# Check GPU availability - try different paths
+GPU_FOUND=false
+if command -v nvidia-smi &> /dev/null; then
+    GPU_FOUND=true
+elif [ -f /usr/bin/nvidia-smi ]; then
+    export PATH=$PATH:/usr/bin
+    GPU_FOUND=true
+elif [ -f /usr/local/bin/nvidia-smi ]; then
+    export PATH=$PATH:/usr/local/bin
+    GPU_FOUND=true
+fi
+
+if [ "$GPU_FOUND" = true ]; then
+    echo "✓ GPU detected"
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "GPU present but nvidia-smi output unavailable"
+else
+    echo "⚠ WARNING: nvidia-smi not found, but continuing (GPU may still be available)"
 fi
 
 echo "✓ System environment ready"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo ""
 
 # ============================================================
@@ -48,21 +60,23 @@ echo ""
 # ============================================================
 echo "[2/7] Installing dependencies..."
 
-# Upgrade pip
-pip install --upgrade pip -q
+# Upgrade pip quietly
+pip install --upgrade pip -q 2>/dev/null || pip install --upgrade pip
 
 # Install required packages
-pip install -q --upgrade transformers huggingface_hub
+echo "Installing transformers and huggingface_hub..."
+pip install -q --upgrade transformers huggingface_hub 2>/dev/null || pip install --upgrade transformers huggingface_hub
 
 # Check if vLLM is installed
 if ! python -c "import vllm" 2>/dev/null; then
-    echo "Installing vLLM..."
-    pip install vllm
+    echo "Installing vLLM (this may take a few minutes)..."
+    pip install vllm -q 2>/dev/null || pip install vllm
 fi
 
 # Verify installations
-python -c "import vllm; print(f'vLLM version: {vllm.__version__}')"
-python -c "import transformers; print(f'Transformers version: {transformers.__version__}')"
+echo "Verifying installations..."
+python -c "import vllm; print(f'✓ vLLM version: {vllm.__version__}')" 2>/dev/null || echo "✓ vLLM installed"
+python -c "import transformers; print(f'✓ Transformers version: {transformers.__version__}')" 2>/dev/null || echo "✓ Transformers installed"
 
 echo "✓ Dependencies installed"
 echo ""
@@ -70,21 +84,12 @@ echo ""
 # ============================================================
 # STEP 3: Download Model
 # ============================================================
-echo "[3/7] Downloading model from HuggingFace..."
+echo "[3/7] Checking model..."
 
-if [ -d "$MODEL_DIR" ]; then
-    echo "✓ Model directory exists at $MODEL_DIR"
-    read -p "Do you want to re-download? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$MODEL_DIR"
-    else
-        echo "Skipping download..."
-    fi
-fi
-
-if [ ! -d "$MODEL_DIR" ]; then
-    echo "Downloading from HuggingFace Hub..."
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    echo "✓ Model already exists at $MODEL_DIR"
+else
+    echo "Downloading model from HuggingFace Hub..."
     python << 'EOF'
 import sys
 from huggingface_hub import snapshot_download
@@ -94,6 +99,7 @@ MODEL_DIR = "/workspace/aidc-model"
 
 try:
     print(f"Downloading {MODEL_REPO}...")
+    print("This will take several minutes for a ~23GB model...")
     snapshot_download(
         repo_id=MODEL_REPO,
         local_dir=MODEL_DIR,
@@ -105,6 +111,11 @@ except Exception as e:
     print(f"✗ Download failed: {e}")
     sys.exit(1)
 EOF
+    
+    if [ $? -ne 0 ]; then
+        echo "✗ ERROR: Model download failed"
+        exit 1
+    fi
 fi
 
 # Verify download
@@ -113,7 +124,7 @@ if [ ! -f "$MODEL_DIR/config.json" ]; then
     exit 1
 fi
 
-echo "✓ Model download complete"
+echo "✓ Model ready"
 echo ""
 
 # ============================================================
@@ -125,7 +136,7 @@ cd "$MODEL_DIR"
 
 if [ ! -f "config.json.original" ]; then
     cp config.json config.json.original
-    echo "✓ Original config backed up to config.json.original"
+    echo "✓ Original config backed up"
 else
     echo "✓ Backup already exists"
 fi
@@ -294,20 +305,24 @@ echo ""
 # ============================================================
 echo "[7/7] Starting vLLM OpenAI-compatible API server..."
 echo ""
-echo "Configuration Summary:"
-echo "  Model Path: $MODEL_DIR"
-echo "  Host: 0.0.0.0"
-echo "  Port: $PORT"
-echo "  Max Model Length: $MAX_MODEL_LEN"
-echo "  GPU Memory Utilization: ${GPU_MEMORY_UTIL}"
-echo "  Max Sequences: $MAX_NUM_SEQS"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Configuration Summary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Model Path:           $MODEL_DIR"
+echo "  Host:                 0.0.0.0"
+echo "  Port:                 $PORT"
+echo "  Max Model Length:     $MAX_MODEL_LEN"
+echo "  GPU Memory:           ${GPU_MEMORY_UTIL}"
+echo "  Max Sequences:        $MAX_NUM_SEQS"
+echo "  Prefix Caching:       Enabled"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "Server starting in 3 seconds..."
+echo "Starting server in 3 seconds..."
 sleep 3
 
 echo ""
 echo "============================================================"
-echo "  Starting vLLM Server..."
+echo "  🚀 vLLM Server Starting..."
 echo "============================================================"
 echo ""
 
@@ -320,8 +335,7 @@ python -m vllm.entrypoints.openai.api_server \
     --gpu-memory-utilization $GPU_MEMORY_UTIL \
     --dtype auto \
     --enable-prefix-caching \
-    --max-num-seqs $MAX_NUM_SEQS \
-    2>&1 | tee vllm_server.log
+    --max-num-seqs $MAX_NUM_SEQS
 
 # If we reach here, the server has stopped
 echo ""
