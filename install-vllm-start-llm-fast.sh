@@ -1,5 +1,5 @@
 #!/bin/bash
-# RunPod Deployment Script for AIDC Lao LLM (Gemma 3 4B)
+# Fixed RunPod Deployment Script for AIDC Lao LLM
 # Model: Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it
 
 set -e
@@ -14,6 +14,9 @@ PORT=8000
 MAX_MODEL_LEN=24576
 GPU_MEMORY_UTIL=0.95
 
+# Disable hf_transfer if not installed (fixes the error)
+export HF_HUB_ENABLE_HF_TRANSFER=0
+
 # Check if running on RunPod
 if [ ! -z "$RUNPOD_POD_ID" ]; then
     echo "✓ Running on RunPod Pod: $RUNPOD_POD_ID"
@@ -24,15 +27,24 @@ fi
 # Update system packages
 echo "📦 Updating system packages..."
 apt-get update -qq
-apt-get install -y -qq wget curl git nano htop nvtop
+apt-get install -y -qq wget curl git nano htop
 
 # Install Python dependencies
 echo "🐍 Installing Python dependencies..."
 pip install --upgrade pip --quiet
+
+# Install vLLM with all dependencies
+echo "Installing vLLM..."
 pip install vllm --quiet
+
+# Install additional packages
 pip install fastapi uvicorn[standard] --quiet
 pip install python-dotenv --quiet
 pip install huggingface-hub --quiet
+
+# Optional: Install hf_transfer for faster downloads (if needed)
+echo "📥 Installing hf_transfer for faster model downloads..."
+pip install hf-transfer --quiet || echo "⚠ hf_transfer install failed, continuing without it"
 
 # Setup Hugging Face token if provided
 if [ ! -z "$HF_TOKEN" ]; then
@@ -40,7 +52,7 @@ if [ ! -z "$HF_TOKEN" ]; then
     huggingface-cli login --token $HF_TOKEN
     echo "✓ Hugging Face token configured"
 else
-    echo "⚠ No HF_TOKEN provided - using public model access"
+    echo "⚠ No HF_TOKEN provided - checking if model is accessible..."
 fi
 
 # Check GPU availability
@@ -49,7 +61,42 @@ nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
 GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
 echo "✓ Found $GPU_COUNT GPU(s)"
 
-# Download model (optional pre-caching)
+# Check if model exists on HuggingFace
+echo "🔍 Checking if model exists..."
+python3 << 'EOF'
+from huggingface_hub import model_info
+import sys
+
+model_id = "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it"
+
+try:
+    info = model_info(model_id)
+    print(f"✓ Model found: {model_id}")
+    print(f"  Model ID: {info.modelId}")
+    print(f"  Author: {info.author}")
+    if hasattr(info, 'private') and info.private:
+        print("  ⚠ This is a PRIVATE model - HF_TOKEN required")
+        sys.exit(1)
+except Exception as e:
+    print(f"❌ Error: Cannot access model '{model_id}'")
+    print(f"   {str(e)}")
+    print("\nPossible solutions:")
+    print("1. Make sure the model name is correct")
+    print("2. If it's a private model, set HF_TOKEN environment variable")
+    print("3. Check https://huggingface.co/Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it")
+    sys.exit(1)
+EOF
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Model access check failed. Please verify:"
+    echo "   1. Model exists at: https://huggingface.co/$MODEL_NAME"
+    echo "   2. Model is public or you have provided HF_TOKEN"
+    echo ""
+    exit 1
+fi
+
+# Download model (pre-caching)
 echo "📥 Pre-downloading model to cache..."
 python3 << EOF
 from huggingface_hub import snapshot_download
@@ -57,11 +104,12 @@ import os
 
 model_id = "$MODEL_NAME"
 print(f"Downloading {model_id}...")
+
 try:
     snapshot_download(
         repo_id=model_id,
-        local_dir=f"/root/.cache/huggingface/hub/{model_id.replace('/', '--')}",
-        local_dir_use_symlinks=False
+        local_dir_use_symlinks=False,
+        resume_download=True
     )
     print("✓ Model downloaded successfully")
 except Exception as e:
@@ -73,6 +121,9 @@ EOF
 echo "📝 Creating vLLM startup script..."
 cat > /workspace/start_vllm.sh << 'VLLM_SCRIPT'
 #!/bin/bash
+
+# Disable hf_transfer to avoid errors
+export HF_HUB_ENABLE_HF_TRANSFER=0
 
 # Environment variables with defaults
 MODEL_NAME="${MODEL_NAME:-Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it}"
@@ -97,214 +148,10 @@ python -m vllm.entrypoints.openai.api_server \
     --tensor-parallel-size $TENSOR_PARALLEL_SIZE \
     --dtype auto \
     --enable-prefix-caching \
-    --disable-log-requests
+    --enable-log-requests
 VLLM_SCRIPT
 
 chmod +x /workspace/start_vllm.sh
-
-# Create FastAPI wrapper (optional advanced API)
-echo "📝 Creating FastAPI wrapper..."
-cat > /workspace/api_server.py << 'FASTAPI_SCRIPT'
-from fastapi import FastAPI, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-import httpx
-import json
-import os
-from typing import Optional, List, Dict, Any
-
-app = FastAPI(
-    title="AIDC Lao LLM API",
-    description="Production API for Lao Language Model",
-    version="1.0.0"
-)
-
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-VLLM_ENDPOINT = os.getenv("VLLM_ENDPOINT", "http://localhost:8000/v1")
-API_KEY = os.getenv("API_KEY", "")
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    max_tokens: int = 512
-    temperature: float = 0.7
-    top_p: float = 0.9
-    stream: bool = False
-
-class GenerateRequest(BaseModel):
-    prompt: str
-    max_tokens: int = 512
-    temperature: float = 0.7
-    top_p: float = 0.9
-    stream: bool = False
-
-def verify_api_key(authorization: Optional[str] = Header(None)):
-    if API_KEY and authorization != f"Bearer {API_KEY}":
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return True
-
-@app.get("/")
-async def root():
-    return {
-        "service": "AIDC Lao LLM API",
-        "status": "running",
-        "model": "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it",
-        "endpoints": {
-            "health": "/health",
-            "chat": "/v1/chat/completions",
-            "generate": "/v1/generate"
-        }
-    }
-
-@app.get("/health")
-async def health():
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{VLLM_ENDPOINT}/health")
-            return {"status": "healthy", "vllm": response.status_code == 200}
-    except:
-        return {"status": "unhealthy", "vllm": False}
-
-@app.post("/v1/chat/completions")
-async def chat_completions(
-    request: ChatRequest,
-    authorized: bool = Header(None, alias="Authorization")
-):
-    if API_KEY:
-        verify_api_key(authorized)
-    
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        try:
-            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-            
-            response = await client.post(
-                f"{VLLM_ENDPOINT}/chat/completions",
-                json={
-                    "model": "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it",
-                    "messages": messages,
-                    "max_tokens": request.max_tokens,
-                    "temperature": request.temperature,
-                    "top_p": request.top_p,
-                    "stream": request.stream
-                }
-            )
-            return response.json()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/v1/generate")
-async def generate(
-    request: GenerateRequest,
-    authorized: bool = Header(None, alias="Authorization")
-):
-    if API_KEY:
-        verify_api_key(authorized)
-    
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        try:
-            response = await client.post(
-                f"{VLLM_ENDPOINT}/completions",
-                json={
-                    "model": "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it",
-                    "prompt": request.prompt,
-                    "max_tokens": request.max_tokens,
-                    "temperature": request.temperature,
-                    "top_p": request.top_p,
-                    "stream": request.stream
-                }
-            )
-            return response.json()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("API_PORT", "8001"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-FASTAPI_SCRIPT
-
-# Create Docker-like startup script
-echo "📝 Creating main startup script..."
-cat > /workspace/start_server.sh << 'STARTUP_SCRIPT'
-#!/bin/bash
-
-echo "=========================================="
-echo "Starting AIDC Lao LLM Server"
-echo "=========================================="
-
-# Start vLLM in background
-echo "🚀 Starting vLLM server..."
-/workspace/start_vllm.sh > /workspace/vllm.log 2>&1 &
-VLLM_PID=$!
-
-# Wait for vLLM to be ready
-echo "⏳ Waiting for vLLM to be ready..."
-for i in {1..60}; do
-    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-        echo "✓ vLLM is ready!"
-        break
-    fi
-    echo "Waiting... ($i/60)"
-    sleep 2
-done
-
-# Check if vLLM started successfully
-if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-    echo "❌ vLLM failed to start. Check logs at /workspace/vllm.log"
-    exit 1
-fi
-
-# Display server information
-echo ""
-echo "=========================================="
-echo "✓ Server Started Successfully!"
-echo "=========================================="
-echo "Model: Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it"
-echo "vLLM Endpoint: http://localhost:8000"
-echo "OpenAI API Compatible: http://localhost:8000/v1"
-echo ""
-echo "Test with:"
-echo 'curl http://localhost:8000/v1/chat/completions \\'
-echo '  -H "Content-Type: application/json" \\'
-echo '  -d '"'"'{"model": "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it", "messages": [{"role": "user", "content": "ສະບາຍດີ"}]}'"'"
-echo ""
-echo "Logs: tail -f /workspace/vllm.log"
-echo "=========================================="
-
-# Keep container running and show logs
-tail -f /workspace/vllm.log
-STARTUP_SCRIPT
-
-chmod +x /workspace/start_server.sh
-
-# Create environment file template
-echo "📝 Creating environment configuration..."
-cat > /workspace/.env << 'ENV_FILE'
-# AIDC Lao LLM Configuration
-MODEL_NAME=Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it
-PORT=8000
-MAX_MODEL_LEN=24576
-GPU_MEMORY_UTIL=0.95
-TENSOR_PARALLEL_SIZE=1
-
-# Optional: Hugging Face Token
-# HF_TOKEN=your_token_here
-
-# Optional: API Key for FastAPI wrapper
-# API_KEY=your_secret_key
-ENV_FILE
 
 # Create test script
 echo "📝 Creating test script..."
@@ -313,6 +160,7 @@ cat > /workspace/test_model.py << 'TEST_SCRIPT'
 import requests
 import json
 import sys
+import time
 
 def test_chat():
     url = "http://localhost:8000/v1/chat/completions"
@@ -354,13 +202,24 @@ def test_chat():
 
 def test_health():
     url = "http://localhost:8000/health"
-    try:
-        response = requests.get(url, timeout=5)
-        print(f"✓ Health check: {response.status_code}")
-        return response.status_code == 200
-    except:
-        print("❌ Health check failed")
-        return False
+    max_retries = 30
+    
+    print("Checking server health...")
+    for i in range(max_retries):
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                print(f"✓ Health check passed")
+                return True
+        except:
+            pass
+        
+        if i < max_retries - 1:
+            print(f"Waiting for server... ({i+1}/{max_retries})")
+            time.sleep(2)
+    
+    print("❌ Health check failed - server not responding")
+    return False
 
 if __name__ == "__main__":
     print("========================================")
@@ -371,145 +230,127 @@ if __name__ == "__main__":
         print("\n" + "="*40 + "\n")
         test_chat()
     else:
-        print("Server not ready. Please start the server first.")
+        print("Server not ready. Check logs: tail -f /workspace/vllm.log")
         sys.exit(1)
 TEST_SCRIPT
 
 chmod +x /workspace/test_model.py
 
-# Create RunPod specific readme
-echo "📝 Creating README..."
-cat > /workspace/README.md << 'README'
-# AIDC Lao LLM - RunPod Deployment
+# Create startup script with better error handling
+echo "📝 Creating main startup script..."
+cat > /workspace/start_server.sh << 'STARTUP_SCRIPT'
+#!/bin/bash
 
-## Model Information
-- **Model**: Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it
-- **Architecture**: Gemma 3 4B Instruction-Tuned
-- **Context Length**: 24,576 tokens
-- **Language**: Lao (ພາສາລາວ)
+# Disable hf_transfer
+export HF_HUB_ENABLE_HF_TRANSFER=0
 
-## Quick Start
+echo "=========================================="
+echo "Starting AIDC Lao LLM Server"
+echo "=========================================="
 
-### 1. Start the Server
-```bash
-/workspace/start_server.sh
-```
+# Check if model exists locally or can be accessed
+echo "Verifying model access..."
+python3 << 'VERIFY'
+from huggingface_hub import model_info
+import sys
 
-### 2. Test the Model
-```bash
-python3 /workspace/test_model.py
-```
+model_id = "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it"
 
-### 3. Access via API
+try:
+    info = model_info(model_id)
+    print(f"✓ Model accessible: {model_id}")
+except Exception as e:
+    print(f"❌ Cannot access model: {e}")
+    print("\nPlease check:")
+    print("1. Model name is correct")
+    print("2. Model is public or HF_TOKEN is set")
+    print("3. Internet connection is working")
+    sys.exit(1)
+VERIFY
 
-**OpenAI Compatible Endpoint:**
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it",
-    "messages": [
-      {"role": "user", "content": "ສະບາຍດີ, ເຈົ້າສາມາດຊ່ວຍຂ້ອຍໄດ້ບໍ່?"}
-    ],
-    "max_tokens": 512
-  }'
-```
+if [ $? -ne 0 ]; then
+    echo "❌ Model verification failed. Exiting."
+    exit 1
+fi
 
-**Python Client:**
-```python
-from openai import OpenAI
+# Start vLLM in background
+echo "🚀 Starting vLLM server..."
+/workspace/start_vllm.sh > /workspace/vllm.log 2>&1 &
+VLLM_PID=$!
 
-client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="not-needed"
-)
+echo "vLLM PID: $VLLM_PID"
+echo "Logs: /workspace/vllm.log"
 
-response = client.chat.completions.create(
-    model="Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it",
-    messages=[
-        {"role": "user", "content": "ສະບາຍດີ"}
-    ]
-)
+# Wait for vLLM to be ready
+echo "⏳ Waiting for vLLM to be ready (this may take 1-2 minutes)..."
+for i in {1..60}; do
+    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        echo "✓ vLLM is ready!"
+        break
+    fi
+    
+    # Check if process is still running
+    if ! kill -0 $VLLM_PID 2>/dev/null; then
+        echo "❌ vLLM process died. Check logs:"
+        tail -50 /workspace/vllm.log
+        exit 1
+    fi
+    
+    echo "Waiting... ($i/60)"
+    sleep 2
+done
 
-print(response.choices[0].message.content)
-```
+# Check if vLLM started successfully
+if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+    echo "❌ vLLM failed to start. Last 50 lines of log:"
+    tail -50 /workspace/vllm.log
+    exit 1
+fi
 
-## Configuration
+# Display server information
+echo ""
+echo "=========================================="
+echo "✓ Server Started Successfully!"
+echo "=========================================="
+echo "Model: Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it"
+echo "vLLM Endpoint: http://localhost:8000"
+echo "OpenAI API Compatible: http://localhost:8000/v1"
+echo ""
+echo "Test with:"
+echo 'curl http://localhost:8000/v1/chat/completions \\'
+echo '  -H "Content-Type: application/json" \\'
+echo '  -d '"'"'{"model": "Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it", "messages": [{"role": "user", "content": "ສະບາຍດີ"}]}'"'"
+echo ""
+echo "Or run: python3 /workspace/test_model.py"
+echo ""
+echo "Logs: tail -f /workspace/vllm.log"
+echo "=========================================="
 
-Edit `/workspace/.env` to customize:
-- `MODEL_NAME`: Model identifier
-- `PORT`: Server port (default: 8000)
-- `MAX_MODEL_LEN`: Maximum context length
-- `GPU_MEMORY_UTIL`: GPU memory utilization (0.0-1.0)
-- `TENSOR_PARALLEL_SIZE`: Number of GPUs for tensor parallelism
-
-## Monitoring
-
-### GPU Usage
-```bash
-nvidia-smi -l 1
-# or
-nvtop
-```
-
-### Server Logs
-```bash
+# Keep container running and show logs
 tail -f /workspace/vllm.log
-```
+STARTUP_SCRIPT
 
-### Health Check
-```bash
-curl http://localhost:8000/health
-```
+chmod +x /workspace/start_server.sh
 
-## RunPod Specific
+# Create environment file
+echo "📝 Creating environment configuration..."
+cat > /workspace/.env << 'ENV_FILE'
+# AIDC Lao LLM Configuration
+MODEL_NAME=Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it
+PORT=8000
+MAX_MODEL_LEN=24576
+GPU_MEMORY_UTIL=0.95
+TENSOR_PARALLEL_SIZE=1
 
-### Expose Port
-In RunPod dashboard:
-1. Go to your pod settings
-2. Add exposed port: 8000
-3. Access via: `https://{pod-id}-8000.proxy.runpod.net`
+# Disable hf_transfer (fixes download errors)
+HF_HUB_ENABLE_HF_TRANSFER=0
 
-### Environment Variables
-Set in RunPod template or pod configuration:
-- `HF_TOKEN`: Your Hugging Face token (if needed)
-- `MODEL_NAME`: Override default model
-- `API_KEY`: Optional API authentication
+# Optional: Hugging Face Token (required for private models)
+# HF_TOKEN=your_token_here
 
-## Troubleshooting
-
-### Model Download Issues
-```bash
-# Manually download model
-huggingface-cli download Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it
-```
-
-### Out of Memory
-Reduce GPU memory utilization:
-```bash
-export GPU_MEMORY_UTIL=0.85
-/workspace/start_vllm.sh
-```
-
-### Slow Startup
-Model is downloading on first run. Check progress:
-```bash
-watch -n 1 du -sh ~/.cache/huggingface/
-```
-
-## API Documentation
-
-Once running, visit:
-- Swagger UI: http://localhost:8000/docs
-- OpenAPI Spec: http://localhost:8000/openapi.json
-
-## Support
-
-For issues related to:
-- Model: Contact AIDC team
-- vLLM: https://github.com/vllm-project/vllm
-- RunPod: https://docs.runpod.io
-README
+# Optional: API Key for authentication
+# API_KEY=your_secret_key
+ENV_FILE
 
 echo ""
 echo "=========================================="
@@ -521,13 +362,9 @@ echo "1. Start the server: /workspace/start_server.sh"
 echo "2. Test the model: python3 /workspace/test_model.py"
 echo "3. Access via: http://localhost:8000"
 echo ""
-echo "Files created:"
-echo "  - /workspace/start_vllm.sh      (vLLM server)"
-echo "  - /workspace/start_server.sh     (Main startup)"
-echo "  - /workspace/api_server.py       (FastAPI wrapper)"
-echo "  - /workspace/test_model.py       (Test script)"
-echo "  - /workspace/.env                (Configuration)"
-echo "  - /workspace/README.md           (Documentation)"
+echo "If you get errors, check:"
+echo "- Model exists: https://huggingface.co/$MODEL_NAME"
+echo "- HF_TOKEN is set (if private model)"
+echo "- GPU is available: nvidia-smi"
 echo ""
-echo "📖 Read README.md for full documentation"
 echo "=========================================="
