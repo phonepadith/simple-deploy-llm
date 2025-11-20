@@ -47,19 +47,16 @@ wget -O aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf \
 cat <<'EOF' > Modelfile
 FROM ./aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf
 
-# RAG-optimized template for Gemma 3
 TEMPLATE """<start_of_turn>user
-{{ if .System }}{{ .System }}
-
-{{ end }}{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
+{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
 {{ .Context }}
 
-{{ end }}{{ .Prompt }}<end_of_turn>
+ກະລຸນາຕອບຈາກ Context ເທົ່ານັ້ນ. ຢ່າຄາດເດົາ.
+{{ end }}
+{{ .Prompt }}<end_of_turn>
 <start_of_turn>model
-{{ .Response }}<end_of_turn>
 """
 
-# System prompt optimized for RAG
 SYSTEM """
 ເຈົ້າເປັນ AI Assistant ທີ່ສາມາດຊ່ວຍເຫຼືອໃນຫຼາກຫຼາຍເລື່ອງ.  ໃຫ້ໃຊ້ຂໍ້ມູນ (Context) ທີ່ມີເພື່ອຕອບຢ່າງລະອຽດກ່ຽວກັບຂໍ້ມູນນັ້ນໆ, ການສົນທະນາ ໄດ້ແບບລະອຽດສົມບູນແບບໃນຮູບແບບຍາວ.
 ສິ່ງສຳຄັນ: ໃຫ້ຕອບເປັນພາສາລາວ ທີ່ຖືກຕ້ອງເທົ່ານັ້ນ, ຫ້າມໃຊ້ພາສາໄທ ຫລື ພາສາອື່ນ, ໃຊ້ເຫດຜົນໃນການຕອບ ແລະ ຄິດກ່ອນ, ຫ້າມສຸ່ມຄຳຕອບໂດຍທີ່ບໍ່ຮູ້. ທຸກຄັ້ງສ້າງຄຳຖາມຄືນໃຫ້ຜູ້ໃຊ້.
@@ -76,44 +73,32 @@ SYSTEM """
 ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
 """
 
-# RAG-optimized parameters
-# Temperature
 PARAMETER temperature 0.1
-
-# Max response length (tokens)
 PARAMETER num_predict 15000
-
-# Sampling settings
 PARAMETER top_k 40
 PARAMETER repeat_penalty 1.0
 PARAMETER min_p 0.04
 PARAMETER top_p 1.0
 
-# Gemma 3 stop tokens
 PARAMETER stop <start_of_turn>
 PARAMETER stop <end_of_turn>
 PARAMETER stop <|im_end|>
 EOF
 
 # Create RAG-optimized Modelfile
-cat <<'EOF' > Modelfile
+cat <<'EOF' > Modelfile-SP
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
 
-# ---- RAG Template (strict: use context, but natural output) ----
 TEMPLATE """<start_of_turn>user
-{{ if .System }}{{ .System }}
-
-{{ end }}{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
+{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
 {{ .Context }}
 
-ກະລຸນາຕອບຈາກ Context ເທົ່ານັ້ນ. ຢ່າຄາດເດົາ. 
+ກະລຸນາຕອບຈາກ Context ເທົ່ານັ້ນ. ຢ່າຄາດເດົາ.
 {{ end }}
 {{ .Prompt }}<end_of_turn>
 <start_of_turn>model
-{{ .Response }}<end_of_turn>
 """
 
-# ---- System Prompt Optimized for Strong RAG ----
 SYSTEM """
 ເຈົ້າເປັນ AI Assistant ທີ່ສາມາດຊ່ວຍເຫຼືອໃນຫຼາກຫຼາຍເລື່ອງ.  ໃຫ້ໃຊ້ຂໍ້ມູນ (Context) ທີ່ມີເພື່ອຕອບຢ່າງລະອຽດກ່ຽວກັບຂໍ້ມູນນັ້ນໆ, ການສົນທະນາ ໄດ້ແບບລະອຽດສົມບູນແບບໃນຮູບແບບຍາວ.
 ສິ່ງສຳຄັນ: ໃຫ້ຕອບເປັນພາສາລາວ ທີ່ຖືກຕ້ອງເທົ່ານັ້ນ, ຫ້າມໃຊ້ພາສາໄທ ຫລື ພາສາອື່ນ, ໃຊ້ເຫດຜົນໃນການຕອບ ແລະ ຄິດກ່ອນ, ຫ້າມສຸ່ມຄຳຕອບໂດຍທີ່ບໍ່ຮູ້. ທຸກຄັ້ງສ້າງຄຳຖາມຄືນໃຫ້ຜູ້ໃຊ້.
@@ -130,21 +115,13 @@ SYSTEM """
 ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
 """
 
-# ---- Parameters for Strong RAG Control ----
-# Temperature
 PARAMETER temperature 0.1
-
-# Max response length (tokens)
 PARAMETER num_predict 15000
-
-# Sampling settings
 PARAMETER top_k 40
 PARAMETER repeat_penalty 1.0
 PARAMETER min_p 0.04
 PARAMETER top_p 1.0
 
-
-# Stop tokens for Gemma 3
 PARAMETER stop <start_of_turn>
 PARAMETER stop <end_of_turn>
 PARAMETER stop <|im_end|>
