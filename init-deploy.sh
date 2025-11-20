@@ -68,12 +68,20 @@ SYSTEM """
 """
 
 # RAG-optimized parameters
+# ---- Parameters for Strong RAG Control ----
+# Less hallucination, but still natural
 PARAMETER temperature 0.1
-PARAMETER top_p 0.9
+PARAMETER top_p 0.85
 PARAMETER top_k 40
+
+# Increase context window for long RAG chunks
 PARAMETER num_ctx 8192
-PARAMETER num_predict 2048
-PARAMETER repeat_penalty 1.1
+
+# More generative length
+PARAMETER num_predict 4096
+
+# Force model to stay consistent with context
+PARAMETER repeat_penalty 1.15
 
 # Gemma 3 stop tokens
 PARAMETER stop <start_of_turn>
@@ -82,46 +90,51 @@ PARAMETER stop <|im_end|>
 EOF
 
 # Create RAG-optimized Modelfile
-cat <<'EOF' > Modelfile-SP
+cat <<'EOF' > Modelfile
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
 
-# RAG-optimized template for Gemma 3
+# ---- RAG Template (strict: use context, but natural output) ----
 TEMPLATE """<start_of_turn>user
 {{ if .System }}{{ .System }}
 
 {{ end }}{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
 {{ .Context }}
 
-{{ end }}{{ .Prompt }}<end_of_turn>
+ກະລຸນາຕອບຈາກ Context ເທົ່ານັ້ນ. ຢ່າຄາດເດົາ. 
+{{ end }}
+{{ .Prompt }}<end_of_turn>
 <start_of_turn>model
 {{ .Response }}<end_of_turn>
 """
 
-# System prompt optimized for RAG
+# ---- System Prompt Optimized for Strong RAG ----
 SYSTEM """
-ເຈົ້າເປັນ AI Assistant ທີ່ສະຫຼາດ ແລະ ມີຄວາມຮັບຜິດຊອບ.
+ເຈົ້າແມ່ນ AI Assistant ທີ່ຕອບຕາມຂໍ້ມູນອ້າງອີງ (Context) ເທົ່ານັ້ນ.
 
-ເມື່ອມີຂໍ້ມູນອ້າງອີງ (Context) ໃຫ້:
-- ໃຊ້ຂໍ້ມູນອ້າງອີງເພື່ອຕອບຄຳຖາມຢ່າງແມ່ນຍຳ
-- ອ້າງອີງຂໍ້ມູນຈາກ Context ໂດຍກົງ
-- ຖ້າຂໍ້ມູນໃນ Context ບໍ່ພຽງພໍ ໃຫ້ບອກຢ່າງຊັດເຈນ
+1) ຖ້າ Context ມີຂໍ້ມູນ -> ຕອບຈາກ Context ໂດຍກົງ  
+2) ຖ້າ Context ບໍ່ມີຫຼືບໍ່ພໍ -> ບອກວ່າ “ບໍ່ພົບຂໍ້ມູນໃນ Context”  
+3) ບໍ່ຄວນສ້າງຂໍ້ມູນໃໝ່ ຫຼື ຄາດເດົາ  
+4) ຕອບໃຫ້ລາຍລະອຽດ ແຕ່ອີງຈາກ Context ເທົ່ານັ້ນ
 
-ເມື່ອບໍ່ມີຂໍ້ມູນອ້າງອີງ:
-- ຕອບຕາມຄວາມຮູ້ທົ່ວໄປຂອງເຈົ້າ
-- ໃຫ້ຄຳແນະນຳທີ່ເປັນປະໂຫຍດ
-
-ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
+ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ.
 """
 
-# RAG-optimized parameters
+# ---- Parameters for Strong RAG Control ----
+# Less hallucination, but still natural
 PARAMETER temperature 0.1
-PARAMETER top_p 0.9
+PARAMETER top_p 0.85
 PARAMETER top_k 40
-PARAMETER num_ctx 8192
-PARAMETER num_predict 2048
-PARAMETER repeat_penalty 1.1
 
-# Gemma 3 stop tokens
+# Increase context window for long RAG chunks
+PARAMETER num_ctx 8192
+
+# More generative length
+PARAMETER num_predict 4096
+
+# Force model to stay consistent with context
+PARAMETER repeat_penalty 1.15
+
+# Stop tokens for Gemma 3
 PARAMETER stop <start_of_turn>
 PARAMETER stop <end_of_turn>
 PARAMETER stop <|im_end|>
