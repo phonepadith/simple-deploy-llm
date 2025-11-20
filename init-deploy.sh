@@ -17,15 +17,7 @@ sleep 5
 
 # Pull BGE-M3 embedding model
 echo "Pulling BGE-M3 and creating embedding model..."
-# Create Modelfile
-cat << 'EOF' > Modelfile-EMD
-FROM hf.co/amiya/bge-m3.gguf
-TEMPLATE """{{ .Prompt }}"""
-EOF
-
-# Build Ollama model
-echo "Building bge-m3 embedding model..."
-ollama create bge-m3 -f Modelfile-EMD
+ollama pull bge-m3 
 
 # Create directory
 cd /root || exit
@@ -47,84 +39,92 @@ wget -O aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf \
 cat <<'EOF' > Modelfile
 FROM ./aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf
 
+# RAG-optimized template for Gemma-SEA-LION
 TEMPLATE """<start_of_turn>user
 {{ if .System }}{{ .System }}
-{{ end }}{{ if .Context }}
-ຂໍ້ມູນອ້າງອີງ (Context):
+
+{{ end }}{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
 {{ .Context }}
-{{ end }}
-ຄຳຖາມ: {{ .Prompt }}<end_of_turn>
+
+{{ end }}{{ .Prompt }}<end_of_turn>
 <start_of_turn>model
 {{ .Response }}<end_of_turn>
 """
 
+# System prompt optimized for RAG (Lao language)
 SYSTEM """
-ໜ້າທີ່ຂອງເຈົ້າ: ເຈົ້າເປັນ AI Assistant ທີ່ຊ່ຽວຊານພາສາລາວ. ໃຫ້ຕອບຄຳຖາມໂດຍອີງໃສ່ "ຂໍ້ມູນອ້າງອີງ" (Context) ທີ່ໃຫ້ມາ.
+ເຈົ້າເປັນ AI Assistant ທີ່ສະຫຼາດ ແລະ ມີຄວາມຮັບຜິດຊອບ.
 
-ຂໍ້ຫ້າມ (Strict Rules):
-1. ຫ້າມໃຊ້ຕົວອັກສອນພາສາຕ່າງປະເທດປົນໃນປະໂຫຍກ (ເຊັ່ນ: ຕົວອັກສອນອິນເດຍ, ໄທ, ຫຼື ອັກສອນແປກໆ).
-2. ຫ້າມຂຽນຄຳນຳໜ້າ ເຊັ່ນ: "ຄຳຕອບ:", "ຂໍ້ມູນເພີ່ມເຕີມ:", ຫຼື "Based on context". ໃຫ້ຂຽນເນື້ອຫາຄຳຕອບທັນທີ.
-3. ຕອບເປັນພາສາລາວທີ່ຖືກຕ້ອງຕາມຫຼັກໄວຍາກອນເທົ່ານັ້ນ.
+ເມື່ອມີຂໍ້ມູນອ້າງອີງ (Context) ໃຫ້:
+- ໃຊ້ຂໍ້ມູນອ້າງອີງເພື່ອຕອບຄຳຖາມຢ່າງແມ່ນຍຳ
+- ອ້າງອີງຂໍ້ມູນຈາກ Context ໂດຍກົງ
+- ຖ້າຂໍ້ມູນໃນ Context ບໍ່ພຽງພໍ ໃຫ້ບອກຢ່າງຊັດເຈນ
 
-ຄຳແນະນຳ:
-- ຖ້າມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ສະຫຼຸບ ແລະ ຕອບໂດຍໃຊ້ຂໍ້ມູນນັ້ນ.
-- ຖ້າບໍ່ມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ຕອບຕາມຄວາມຮູ້ທົ່ວໄປ.
-- ຢ່າລືມສ້າງຄຳຖາມກັບຄືນຫາຜູ້ໃຊ້ໃນຕອນທ້າຍ.
+ເມື່ອບໍ່ມີຂໍ້ມູນອ້າງອີງ:
+- ຕອບຕາມຄວາມຮູ້ທົ່ວໄປຂອງເຈົ້າ
+- ໃຫ້ຄຳແນະນຳທີ່ເປັນປະໂຫຍດ
+
+ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
 """
 
-PARAMETER temperature 0.1
-PARAMETER num_predict 15000
-# Changed from 1.0 to 1.1 to reduce token glitches
-PARAMETER repeat_penalty 1.1 
+# RAG-optimized parameters for 27B model
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
 PARAMETER top_k 40
-PARAMETER min_p 0.05
-PARAMETER top_p 0.95
+PARAMETER num_ctx 8192
+PARAMETER num_predict 2048
+PARAMETER repeat_penalty 1.1
 
-PARAMETER stop "<start_of_turn>"
-PARAMETER stop "<end_of_turn>"
-PARAMETER stop "<|im_end|>"
+# Gemma stop tokens
+PARAMETER stop <start_of_turn>
+PARAMETER stop <end_of_turn>
+PARAMETER stop <|im_end|>
 EOF
 
 # Create RAG-optimized Modelfile
 cat <<'EOF' > Modelfile-SP
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
 
+# RAG-optimized template for Gemma-SEA-LION
 TEMPLATE """<start_of_turn>user
 {{ if .System }}{{ .System }}
-{{ end }}{{ if .Context }}
-ຂໍ້ມູນອ້າງອີງ (Context):
+
+{{ end }}{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
 {{ .Context }}
-{{ end }}
-ຄຳຖາມ: {{ .Prompt }}<end_of_turn>
+
+{{ end }}{{ .Prompt }}<end_of_turn>
 <start_of_turn>model
 {{ .Response }}<end_of_turn>
 """
 
+# System prompt optimized for RAG (Lao language)
 SYSTEM """
-ໜ້າທີ່ຂອງເຈົ້າ: ເຈົ້າເປັນ AI Assistant ທີ່ຊ່ຽວຊານພາສາລາວ. ໃຫ້ຕອບຄຳຖາມໂດຍອີງໃສ່ "ຂໍ້ມູນອ້າງອີງ" (Context) ທີ່ໃຫ້ມາ.
+ເຈົ້າເປັນ AI Assistant ທີ່ສະຫຼາດ ແລະ ມີຄວາມຮັບຜິດຊອບ.
 
-ຂໍ້ຫ້າມ (Strict Rules):
-1. ຫ້າມໃຊ້ຕົວອັກສອນພາສາຕ່າງປະເທດປົນໃນປະໂຫຍກ (ເຊັ່ນ: ຕົວອັກສອນອິນເດຍ, ໄທ, ຫຼື ອັກສອນແປກໆ).
-2. ຫ້າມຂຽນຄຳນຳໜ້າ ເຊັ່ນ: "ຄຳຕອບ:", "ຂໍ້ມູນເພີ່ມເຕີມ:", ຫຼື "Based on context". ໃຫ້ຂຽນເນື້ອຫາຄຳຕອບທັນທີ.
-3. ຕອບເປັນພາສາລາວທີ່ຖືກຕ້ອງຕາມຫຼັກໄວຍາກອນເທົ່ານັ້ນ.
+ເມື່ອມີຂໍ້ມູນອ້າງອີງ (Context) ໃຫ້:
+- ໃຊ້ຂໍ້ມູນອ້າງອີງເພື່ອຕອບຄຳຖາມຢ່າງແມ່ນຍຳ
+- ອ້າງອີງຂໍ້ມູນຈາກ Context ໂດຍກົງ
+- ຖ້າຂໍ້ມູນໃນ Context ບໍ່ພຽງພໍ ໃຫ້ບອກຢ່າງຊັດເຈນ
 
-ຄຳແນະນຳ:
-- ຖ້າມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ສະຫຼຸບ ແລະ ຕອບໂດຍໃຊ້ຂໍ້ມູນນັ້ນ.
-- ຖ້າບໍ່ມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ຕອບຕາມຄວາມຮູ້ທົ່ວໄປ.
-- ຢ່າລືມສ້າງຄຳຖາມກັບຄືນຫາຜູ້ໃຊ້ໃນຕອນທ້າຍ.
+ເມື່ອບໍ່ມີຂໍ້ມູນອ້າງອີງ:
+- ຕອບຕາມຄວາມຮູ້ທົ່ວໄປຂອງເຈົ້າ
+- ໃຫ້ຄຳແນະນຳທີ່ເປັນປະໂຫຍດ
+
+ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
 """
 
-PARAMETER temperature 0.1
-PARAMETER num_predict 15000
-# Changed from 1.0 to 1.1 to reduce token glitches
-PARAMETER repeat_penalty 1.1 
+# RAG-optimized parameters for 27B model
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
 PARAMETER top_k 40
-PARAMETER min_p 0.05
-PARAMETER top_p 0.95
+PARAMETER num_ctx 8192
+PARAMETER num_predict 2048
+PARAMETER repeat_penalty 1.1
 
-PARAMETER stop "<start_of_turn>"
-PARAMETER stop "<end_of_turn>"
-PARAMETER stop "<|im_end|>"
+# Gemma stop tokens
+PARAMETER stop <start_of_turn>
+PARAMETER stop <end_of_turn>
+PARAMETER stop <|im_end|>
 EOF
 
 
