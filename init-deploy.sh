@@ -68,20 +68,17 @@ SYSTEM """
 """
 
 # RAG-optimized parameters
-# ---- Parameters for Strong RAG Control ----
-# Less hallucination, but still natural
+# Temperature
 PARAMETER temperature 0.1
-PARAMETER top_p 0.85
+
+# Max response length (tokens)
+PARAMETER num_predict 15000
+
+# Sampling settings
 PARAMETER top_k 40
-
-# Increase context window for long RAG chunks
-PARAMETER num_ctx 8192
-
-# More generative length
-PARAMETER num_predict 4096
-
-# Force model to stay consistent with context
-PARAMETER repeat_penalty 1.15
+PARAMETER repeat_penalty 1.0       # OFF in UI = neutral (1.0)
+PARAMETER min_p 0.04
+PARAMETER top_p 1.0
 
 # Gemma 3 stop tokens
 PARAMETER stop <start_of_turn>
@@ -120,19 +117,18 @@ SYSTEM """
 """
 
 # ---- Parameters for Strong RAG Control ----
-# Less hallucination, but still natural
+# Temperature
 PARAMETER temperature 0.1
-PARAMETER top_p 0.85
+
+# Max response length (tokens)
+PARAMETER num_predict 15000
+
+# Sampling settings
 PARAMETER top_k 40
+PARAMETER repeat_penalty 1.0       # OFF in UI = neutral (1.0)
+PARAMETER min_p 0.04
+PARAMETER top_p 1.0
 
-# Increase context window for long RAG chunks
-PARAMETER num_ctx 8192
-
-# More generative length
-PARAMETER num_predict 4096
-
-# Force model to stay consistent with context
-PARAMETER repeat_penalty 1.15
 
 # Stop tokens for Gemma 3
 PARAMETER stop <start_of_turn>
