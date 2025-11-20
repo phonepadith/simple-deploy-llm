@@ -16,8 +16,18 @@ echo "Ollama server started in background. Logs: /root/AIDC-LLM/ollama.log"
 sleep 5
 
 # Pull BGE-M3 embedding model
-echo "Pulling BGE-M3 embedding model..."
-ollama pull bge-m3
+echo "Pulling BGE-M3 and creating embedding model..."
+# Create Modelfile
+cat << 'EOF' > Modelfile-EMD
+FROM hf.co/BAAI/bge-m3
+
+TEMPLATE """{{ .Prompt }}"""
+PARAMETER embedding true
+EOF
+
+# Build Ollama model
+echo "Building bge-m3 embedding model..."
+ollama create bge-m3 -f Modelfile-EMD
 
 # Create directory
 cd /root || exit
