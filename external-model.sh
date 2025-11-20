@@ -7,7 +7,7 @@ wget -O Gemma-SEA-LION-v4-27B-IT-Q8_0.gguf \
 "https://huggingface.co/aisingapore/Gemma-SEA-LION-v4-27B-IT-GGUF/resolve/main/Gemma-SEA-LION-v4-27B-IT-Q8_0.gguf"
 
 # Create RAG-optimized Modelfile for SEA-LION
-cat <<'EOF' > Modelfile
+cat <<'EOF' > Modelfile-LARGE
 FROM ./Gemma-SEA-LION-v4-27B-IT-Q8_0.gguf
 
 # RAG-optimized template for Gemma-SEA-LION
@@ -54,7 +54,7 @@ EOF
 
 # Create Ollama model
 echo "Creating Ollama model..."
-ollama create MOIC-CH-2-1 -f Modelfile
+ollama create AIDC-LARGE-LLM -f Modelfile-LARGE
 
 echo "Model created successfully!"
 echo "Model name: sealion-laos-rag"
