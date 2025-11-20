@@ -20,9 +20,7 @@ echo "Pulling BGE-M3 and creating embedding model..."
 # Create Modelfile
 cat << 'EOF' > Modelfile-EMD
 FROM hf.co/amiya/bge-m3.gguf
-
 TEMPLATE """{{ .Prompt }}"""
-PARAMETER embedding true
 EOF
 
 # Build Ollama model
