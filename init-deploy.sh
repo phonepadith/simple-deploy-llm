@@ -19,7 +19,7 @@ sleep 5
 echo "Pulling BGE-M3 and creating embedding model..."
 # Create Modelfile
 cat << 'EOF' > Modelfile-EMD
-FROM hf.co/BAAI/bge-m3
+FROM hf.co/amiya/bge-m3.gguf
 
 TEMPLATE """{{ .Prompt }}"""
 PARAMETER embedding true
