@@ -47,14 +47,15 @@ wget -O aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf \
 cat <<'EOF' > Modelfile
 FROM ./aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf
 
-TEMPLATE """<start_of_turn>user
-{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
-{{ .Context }}
-
-ກະລຸນາຕອບຈາກ Context ເທົ່ານັ້ນ. ຢ່າຄາດເດົາ.
-{{ end }}
-{{ .Prompt }}<end_of_turn>
+TEMPLATE """
+<start_of_turn>user
+{{ if .System }}{{ .System }}{{ end }}
+{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context): {{ .Context }}{{ end }}
+{{ .Prompt }}
+<end_of_turn>
 <start_of_turn>model
+{{ .Response }}
+<end_of_turn>
 """
 
 SYSTEM """
@@ -89,14 +90,15 @@ EOF
 cat <<'EOF' > Modelfile-SP
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
 
-TEMPLATE """<start_of_turn>user
-{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context):
-{{ .Context }}
-
-ກະລຸນາຕອບຈາກ Context ເທົ່ານັ້ນ. ຢ່າຄາດເດົາ.
-{{ end }}
-{{ .Prompt }}<end_of_turn>
+TEMPLATE """
+<start_of_turn>user
+{{ if .System }}{{ .System }}{{ end }}
+{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context): {{ .Context }}{{ end }}
+{{ .Prompt }}
+<end_of_turn>
 <start_of_turn>model
+{{ .Response }}
+<end_of_turn>
 """
 
 SYSTEM """
