@@ -76,7 +76,7 @@ PARAMETER num_predict 15000
 
 # Sampling settings
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.0       # OFF in UI = neutral (1.0)
+PARAMETER repeat_penalty 1.0
 PARAMETER min_p 0.04
 PARAMETER top_p 1.0
 
@@ -125,7 +125,7 @@ PARAMETER num_predict 15000
 
 # Sampling settings
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.0       # OFF in UI = neutral (1.0)
+PARAMETER repeat_penalty 1.0
 PARAMETER min_p 0.04
 PARAMETER top_p 1.0
 
