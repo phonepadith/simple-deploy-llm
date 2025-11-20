@@ -47,86 +47,84 @@ wget -O aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf \
 cat <<'EOF' > Modelfile
 FROM ./aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf
 
-TEMPLATE """
-<start_of_turn>user
-{{ if .System }}{{ .System }}{{ end }}
-{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context): {{ .Context }}{{ end }}
-{{ .Prompt }}
-<end_of_turn>
+TEMPLATE """<start_of_turn>user
+{{ if .System }}{{ .System }}
+{{ end }}{{ if .Context }}
+ຂໍ້ມູນອ້າງອີງ (Context):
+{{ .Context }}
+{{ end }}
+ຄຳຖາມ: {{ .Prompt }}<end_of_turn>
 <start_of_turn>model
-{{ .Response }}
-<end_of_turn>
+{{ .Response }}<end_of_turn>
 """
 
 SYSTEM """
-ເຈົ້າເປັນ AI Assistant ທີ່ສາມາດຊ່ວຍເຫຼືອໃນຫຼາກຫຼາຍເລື່ອງ.  ໃຫ້ໃຊ້ຂໍ້ມູນ (Context) ທີ່ມີເພື່ອຕອບຢ່າງລະອຽດກ່ຽວກັບຂໍ້ມູນນັ້ນໆ, ການສົນທະນາ ໄດ້ແບບລະອຽດສົມບູນແບບໃນຮູບແບບຍາວ.
-ສິ່ງສຳຄັນ: ໃຫ້ຕອບເປັນພາສາລາວ ທີ່ຖືກຕ້ອງເທົ່ານັ້ນ, ຫ້າມໃຊ້ພາສາໄທ ຫລື ພາສາອື່ນ, ໃຊ້ເຫດຜົນໃນການຕອບ ແລະ ຄິດກ່ອນ, ຫ້າມສຸ່ມຄຳຕອບໂດຍທີ່ບໍ່ຮູ້. ທຸກຄັ້ງສ້າງຄຳຖາມຄືນໃຫ້ຜູ້ໃຊ້.
+ໜ້າທີ່ຂອງເຈົ້າ: ເຈົ້າເປັນ AI Assistant ທີ່ຊ່ຽວຊານພາສາລາວ. ໃຫ້ຕອບຄຳຖາມໂດຍອີງໃສ່ "ຂໍ້ມູນອ້າງອີງ" (Context) ທີ່ໃຫ້ມາ.
 
-ເມື່ອມີຂໍ້ມູນອ້າງອີງ (Context) ໃຫ້:
-- ໃຊ້ຂໍ້ມູນອ້າງອີງເພື່ອຕອບຄຳຖາມຢ່າງແມ່ນຍຳ
-- ອ້າງອີງຂໍ້ມູນຈາກ Context ໂດຍກົງ
-- ຖ້າຂໍ້ມູນໃນ Context ບໍ່ພຽງພໍ ໃຫ້ບອກຢ່າງຊັດເຈນ
+ຂໍ້ຫ້າມ (Strict Rules):
+1. ຫ້າມໃຊ້ຕົວອັກສອນພາສາຕ່າງປະເທດປົນໃນປະໂຫຍກ (ເຊັ່ນ: ຕົວອັກສອນອິນເດຍ, ໄທ, ຫຼື ອັກສອນແປກໆ).
+2. ຫ້າມຂຽນຄຳນຳໜ້າ ເຊັ່ນ: "ຄຳຕອບ:", "ຂໍ້ມູນເພີ່ມເຕີມ:", ຫຼື "Based on context". ໃຫ້ຂຽນເນື້ອຫາຄຳຕອບທັນທີ.
+3. ຕອບເປັນພາສາລາວທີ່ຖືກຕ້ອງຕາມຫຼັກໄວຍາກອນເທົ່ານັ້ນ.
 
-ເມື່ອບໍ່ມີຂໍ້ມູນອ້າງອີງ:
-- ຕອບຕາມຄວາມຮູ້ທົ່ວໄປຂອງເຈົ້າ
-- ໃຫ້ຄຳແນະນຳທີ່ເປັນປະໂຫຍດ
-
-ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
+ຄຳແນະນຳ:
+- ຖ້າມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ສະຫຼຸບ ແລະ ຕອບໂດຍໃຊ້ຂໍ້ມູນນັ້ນ.
+- ຖ້າບໍ່ມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ຕອບຕາມຄວາມຮູ້ທົ່ວໄປ.
+- ຢ່າລືມສ້າງຄຳຖາມກັບຄືນຫາຜູ້ໃຊ້ໃນຕອນທ້າຍ.
 """
 
 PARAMETER temperature 0.1
 PARAMETER num_predict 15000
+# Changed from 1.0 to 1.1 to reduce token glitches
+PARAMETER repeat_penalty 1.1 
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.0
-PARAMETER min_p 0.04
-PARAMETER top_p 1.0
+PARAMETER min_p 0.05
+PARAMETER top_p 0.95
 
-PARAMETER stop <start_of_turn>
-PARAMETER stop <end_of_turn>
-PARAMETER stop <|im_end|>
+PARAMETER stop "<start_of_turn>"
+PARAMETER stop "<end_of_turn>"
+PARAMETER stop "<|im_end|>"
 EOF
 
 # Create RAG-optimized Modelfile
 cat <<'EOF' > Modelfile-SP
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
 
-TEMPLATE """
-<start_of_turn>user
-{{ if .System }}{{ .System }}{{ end }}
-{{ if .Context }}ຂໍ້ມູນອ້າງອີງ (Context): {{ .Context }}{{ end }}
-{{ .Prompt }}
-<end_of_turn>
+TEMPLATE """<start_of_turn>user
+{{ if .System }}{{ .System }}
+{{ end }}{{ if .Context }}
+ຂໍ້ມູນອ້າງອີງ (Context):
+{{ .Context }}
+{{ end }}
+ຄຳຖາມ: {{ .Prompt }}<end_of_turn>
 <start_of_turn>model
-{{ .Response }}
-<end_of_turn>
+{{ .Response }}<end_of_turn>
 """
 
 SYSTEM """
-ເຈົ້າເປັນ AI Assistant ທີ່ສາມາດຊ່ວຍເຫຼືອໃນຫຼາກຫຼາຍເລື່ອງ.  ໃຫ້ໃຊ້ຂໍ້ມູນ (Context) ທີ່ມີເພື່ອຕອບຢ່າງລະອຽດກ່ຽວກັບຂໍ້ມູນນັ້ນໆ, ການສົນທະນາ ໄດ້ແບບລະອຽດສົມບູນແບບໃນຮູບແບບຍາວ.
-ສິ່ງສຳຄັນ: ໃຫ້ຕອບເປັນພາສາລາວ ທີ່ຖືກຕ້ອງເທົ່ານັ້ນ, ຫ້າມໃຊ້ພາສາໄທ ຫລື ພາສາອື່ນ, ໃຊ້ເຫດຜົນໃນການຕອບ ແລະ ຄິດກ່ອນ, ຫ້າມສຸ່ມຄຳຕອບໂດຍທີ່ບໍ່ຮູ້. ທຸກຄັ້ງສ້າງຄຳຖາມຄືນໃຫ້ຜູ້ໃຊ້.
+ໜ້າທີ່ຂອງເຈົ້າ: ເຈົ້າເປັນ AI Assistant ທີ່ຊ່ຽວຊານພາສາລາວ. ໃຫ້ຕອບຄຳຖາມໂດຍອີງໃສ່ "ຂໍ້ມູນອ້າງອີງ" (Context) ທີ່ໃຫ້ມາ.
 
-ເມື່ອມີຂໍ້ມູນອ້າງອີງ (Context) ໃຫ້:
-- ໃຊ້ຂໍ້ມູນອ້າງອີງເພື່ອຕອບຄຳຖາມຢ່າງແມ່ນຍຳ
-- ອ້າງອີງຂໍ້ມູນຈາກ Context ໂດຍກົງ
-- ຖ້າຂໍ້ມູນໃນ Context ບໍ່ພຽງພໍ ໃຫ້ບອກຢ່າງຊັດເຈນ
+ຂໍ້ຫ້າມ (Strict Rules):
+1. ຫ້າມໃຊ້ຕົວອັກສອນພາສາຕ່າງປະເທດປົນໃນປະໂຫຍກ (ເຊັ່ນ: ຕົວອັກສອນອິນເດຍ, ໄທ, ຫຼື ອັກສອນແປກໆ).
+2. ຫ້າມຂຽນຄຳນຳໜ້າ ເຊັ່ນ: "ຄຳຕອບ:", "ຂໍ້ມູນເພີ່ມເຕີມ:", ຫຼື "Based on context". ໃຫ້ຂຽນເນື້ອຫາຄຳຕອບທັນທີ.
+3. ຕອບເປັນພາສາລາວທີ່ຖືກຕ້ອງຕາມຫຼັກໄວຍາກອນເທົ່ານັ້ນ.
 
-ເມື່ອບໍ່ມີຂໍ້ມູນອ້າງອີງ:
-- ຕອບຕາມຄວາມຮູ້ທົ່ວໄປຂອງເຈົ້າ
-- ໃຫ້ຄຳແນະນຳທີ່ເປັນປະໂຫຍດ
-
-ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
+ຄຳແນະນຳ:
+- ຖ້າມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ສະຫຼຸບ ແລະ ຕອບໂດຍໃຊ້ຂໍ້ມູນນັ້ນ.
+- ຖ້າບໍ່ມີຂໍ້ມູນອ້າງອີງ: ໃຫ້ຕອບຕາມຄວາມຮູ້ທົ່ວໄປ.
+- ຢ່າລືມສ້າງຄຳຖາມກັບຄືນຫາຜູ້ໃຊ້ໃນຕອນທ້າຍ.
 """
 
 PARAMETER temperature 0.1
 PARAMETER num_predict 15000
+# Changed from 1.0 to 1.1 to reduce token glitches
+PARAMETER repeat_penalty 1.1 
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.0
-PARAMETER min_p 0.04
-PARAMETER top_p 1.0
+PARAMETER min_p 0.05
+PARAMETER top_p 0.95
 
-PARAMETER stop <start_of_turn>
-PARAMETER stop <end_of_turn>
-PARAMETER stop <|im_end|>
+PARAMETER stop "<start_of_turn>"
+PARAMETER stop "<end_of_turn>"
+PARAMETER stop "<|im_end|>"
 EOF
 
 
