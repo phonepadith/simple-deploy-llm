@@ -68,11 +68,11 @@ SYSTEM """
 """
 
 # RAG-optimized parameters for 27B model
-PARAMETER temperature 0.3
+PARAMETER temperature 0.1
 PARAMETER top_p 0.9
 PARAMETER top_k 40
 PARAMETER num_ctx 8192
-PARAMETER num_predict 2048
+PARAMETER num_predict 15000
 PARAMETER repeat_penalty 1.1
 
 # Gemma stop tokens
@@ -114,11 +114,11 @@ SYSTEM """
 """
 
 # RAG-optimized parameters for 27B model
-PARAMETER temperature 0.3
+PARAMETER temperature 0.1
 PARAMETER top_p 0.9
 PARAMETER top_k 40
 PARAMETER num_ctx 8192
-PARAMETER num_predict 2048
+PARAMETER num_predict 15000
 PARAMETER repeat_penalty 1.1
 
 # Gemma stop tokens
