@@ -130,12 +130,17 @@ EOF
 
 # Create Ollama model
 echo "Creating Ollama model..."
-ollama create BOL-CH-2 -f Modelfile
 ollama create AIDC-STANDARD-LLM -f Modelfile
 ollama create AIDC-FAST-LLM -f Modelfile-SP
-ollama cp BOL-CH-2 BOL-CH-3
-ollama cp BOL-CH-2 BOL-CH-4
-ollama cp BOL-CH-2 ROBOT-AIDC-LLM
+
+ollama cp AIDC-FAST-LLM ROBOT-AIDC-LLM
+ollama cp AIDC-FAST-LLM AIDC-FAST-LLM-BOL
+ollama cp AIDC-FAST-LLM AIDC-FAST-LLM-MOIC
+ollama cp AIDC-FAST-LLM AIDC-FAST-LLM-MOF
+
+ollama cp AIDC-STANDARD-LLM AIDC-STANDARD-LLM-BOL
+ollama cp AIDC-STANDARD-LLM AIDC-STANDARD-LLM-MOIC
+ollama cp AIDC-STANDARD-LLM AIDC-STANDARD-LLM-MOF
 
 echo "Model created successfully!"
 echo "Model name: aidc-llm-laos"
