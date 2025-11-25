@@ -1,3 +1,4 @@
+cd /root/AIDC-LLM
 # Create RAG-optimized Modelfile
 cat <<'EOF' > Modelfile-AIDCHR
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
