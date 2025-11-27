@@ -8,12 +8,26 @@ apt install -y lshw wget
 # Install Ollama (x86_64)
 curl -s https://ollama.com/install.sh | bash
 
-# Run Ollama server in background
-nohup ollama serve > ollama.log 2>&1 &
-echo "Ollama server started in background. Logs: /home/aidc/AIDC-LLM/ollama.log"
+# Stop any existing ollama service to apply new configs
+systemctl stop ollama || true
+pkill ollama || true
 
-# Wait for Ollama to be ready
-sleep 5
+# --- CONFIGURATION FOR EXPOSING PORT ---
+# 0.0.0.0 allows connections from any IP
+export OLLAMA_HOST=0.0.0.0:11434
+# "*" allows Open WebUI to connect from a different browser/domain
+export OLLAMA_ORIGINS="*"
+
+# Run Ollama server in background with new configs
+nohup ollama serve > ollama.log 2>&1 &
+echo "Ollama server started in background on 0.0.0.0:11434"
+
+# Wait for Ollama to be fully ready (Check loop)
+echo "Waiting for Ollama to start..."
+until curl -s http://localhost:11434/api/tags > /dev/null; do
+    sleep 2
+    echo "Retrying..."
+done
 
 # Pull BGE-M3 embedding model
 echo "Pulling BGE-M3 and creating embedding model..."
@@ -29,13 +43,13 @@ echo "Downloading model AIDC-12B-IT..."
 wget -O aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf \
 "https://huggingface.co/Phonepadith/aidc-llm-laos-24k-gemma-3-12b-it/resolve/main/aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf"
 
-#Download Speed Model of AIDC
+# Download Speed Model of AIDC
 echo "Downloading model AIDC-4B-IT..."
 wget -O aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf \
 "https://huggingface.co/Phonepadith/aidc-llm-laos-24k-gemma-3-4b-it/resolve/main/aidc-llm-laos-24k-gemma-3-4b-it-Q8.gguf"
 
 
-# Create RAG-optimized Modelfile
+# Create RAG-optimized Modelfile (Standard)
 cat <<'EOF' > Modelfile
 FROM ./aidc-llm-laos-24k-gemma-3-12b-it-q8.gguf
 
@@ -51,7 +65,6 @@ TEMPLATE """<start_of_turn>user
 {{ .Response }}<end_of_turn>
 """
 
-# System prompt optimized for RAG (Lao language)
 SYSTEM """
 ເຈົ້າເປັນ AI Assistant ທີ່ສະຫຼາດ ແລະ ມີຄວາມຮັບຜິດຊອບ.
 
@@ -67,7 +80,7 @@ SYSTEM """
 ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
 """
 
-# RAG-optimized parameters for 3B and 12B model
+# RAG-optimized parameters for 12B model
 PARAMETER temperature 0.1
 PARAMETER top_p 0.9
 PARAMETER top_k 40
@@ -81,11 +94,11 @@ PARAMETER stop <end_of_turn>
 PARAMETER stop <|im_end|>
 EOF
 
-# Create RAG-optimized Modelfile
+# Create RAG-optimized Modelfile (Fast)
 cat <<'EOF' > Modelfile-SP
 FROM ./aidc-llm-laos-24k-gemma-3-4b-it-q8.gguf
 
-# RAG-optimized template for Gemma-SEA-LION
+# RAG-optimized template for Gemma-3
 TEMPLATE """<start_of_turn>user
 {{ if .System }}{{ .System }}
 
@@ -97,7 +110,6 @@ TEMPLATE """<start_of_turn>user
 {{ .Response }}<end_of_turn>
 """
 
-# System prompt optimized for RAG (Lao language)
 SYSTEM """
 ເຈົ້າເປັນ AI Assistant ທີ່ສະຫຼາດ ແລະ ມີຄວາມຮັບຜິດຊອບ.
 
@@ -113,7 +125,7 @@ SYSTEM """
 ຕອບເປັນພາສາລາວທີ່ຊັດເຈນ ແລະ ເຂົ້າໃຈງ່າຍ.
 """
 
-# RAG-optimized parameters for 27B model
+# RAG-optimized parameters for 4B model
 PARAMETER temperature 0.1
 PARAMETER top_p 0.9
 PARAMETER top_k 40
@@ -128,20 +140,22 @@ PARAMETER stop <|im_end|>
 EOF
 
 
-# Create Ollama model
-echo "Creating Ollama model..."
+# Create Ollama models
+echo "Creating Ollama models..."
 ollama create AIDC-STANDARD-LLM -f Modelfile
 ollama create AIDC-FAST-LLM -f Modelfile-SP
 
 
-echo "Model created successfully!"
-echo "Model name: aidc-llm-laos"
-echo "Embedding model: bge-m3"
-echo ""
+echo "============================================="
+echo "Models created successfully!"
+echo "High Quality Model: AIDC-STANDARD-LLM"
+echo "High Speed Model:   AIDC-FAST-LLM"
+echo "Embedding Model:    bge-m3"
+echo "============================================="
 echo "Test the model:"
-echo "ollama run aidc-llm-laos"
+echo "ollama run AIDC-STANDARD-LLM"
 echo ""
-echo "Connect to Open WebUI:"
-echo "- Ollama API URL: http://localhost:11434"
-echo "- Model name: aidc-llm-laos"
+echo "Connect to Open WebUI / External Apps:"
+echo "- Ollama API URL: http://<YOUR-SERVER-IP>:11434"
+echo "- Model name: AIDC-STANDARD-LLM"
 echo "- Embedding model: bge-m3"
