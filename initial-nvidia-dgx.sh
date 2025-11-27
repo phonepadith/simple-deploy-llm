@@ -34,7 +34,7 @@ echo "Pulling BGE-M3 and creating embedding model..."
 ollama pull bge-m3 
 
 # Create directory
-cd /home/workspace || exit
+cd /home/aidc/workspace || exit
 mkdir -p AIDC-LLM
 cd AIDC-LLM
 
